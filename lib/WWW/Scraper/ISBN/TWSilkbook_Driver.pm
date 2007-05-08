@@ -6,7 +6,7 @@ use strict;
 use warnings;
 
 use vars qw($VERSION @ISA);
-$VERSION = '0.01';
+$VERSION = '0.02';
 
 #--------------------------------------------------------------------------
 
@@ -33,14 +33,13 @@ Searches for book information from the TWSilkbook' online catalog.
 use WWW::Scraper::ISBN::Driver;
 use WWW::Mechanize;
 use Template::Extract;
-
-use Data::Dumper;
+use Text::Iconv;
 
 ###########################################################################
 #Constants                                                                #
 ###########################################################################
 
-use constant	SILKBOOK	=> 'http://www.silkbook.com';
+use constant	QUERY	=> 'http://www.silkbook.com/function/Search_List_Book.asp?item=5&text=%s';
 
 #--------------------------------------------------------------------------
 
@@ -90,20 +89,15 @@ sub search {
 	$self->found(0);
 	$self->book(undef);
 
+	my $url = sprintf(QUERY, $isbn);
 	my $mechanize = WWW::Mechanize->new();
-	$mechanize->get(SILKBOOK);
-
-	$mechanize->submit_form(
-		form_number	=> 1,
-		fields		=> {
-			item	=> 5,
-			text	=> $isbn,
-		},
-	);
+	$mechanize->get($url);
+	return undef unless($mechanize->success());
 
 	# The Search Results page
 	my $template = <<END;
-您要找的書[% ... %]<a HREF="[% book %]">
+<form name="buy_form" [% ... %]
+<a HREF="[% book %]">
 END
 
 	my $extract = Template::Extract->new;
@@ -116,15 +110,14 @@ END
 	$mechanize->get($book);
 
 	$template = <<END;
-第二欄主要內容[% ... %]
+<table BORDER="0" [% ... %]
 <img src="[% image_link %]" ALT="[% title %]"[% ... %]
-作者：[% author %]<br>[% ... %]
-出版社：[% publisher %]<br>[% ... %]
-出版日期：[% pubdate %] <br>[% ... %]
-頁數：<FONT FACE="Arial">[% pages %]</FONT>頁<BR>[% ... %]
-ISBN：<font FACE="Arial">[% isbn %]</font><br>[% ... %]
-原價：<FONT  COLOR="#999999"><S>[% price_list %]</S></FONT>元[% ... %]
-售價：<FONT FACE="Arial" COLOR="#BD0000">[% price_sell %]</FONT>元<BR>
+<div align="left">[% author %]<br>
+[% publisher %]<br>[% ... %]
+<br>[% pubdate %] <br>[% ... %]
+<FONT FACE="Arial">[% pages %]</FONT>[% ... %]
+<S>[% price_list %]</S>[% ... %]
+<strong>[% ... %]<strong>[% price_sell %]</strong>
 END
 
 	$data = $extract->extract($template, $mechanize->content());
@@ -132,15 +125,22 @@ END
 	return $self->handler("Could not extract data from TWSilkbook result page.")
 		unless(defined $data);
 
-	$data->{author} =~ s/ \/ 譯者.*//;
+	my $conv = Text::Iconv->new("utf-8", "big5");
+	$data->{title} = $conv->convert($data->{title});
+	$data->{author} = $conv->convert($data->{author});
+	$data->{author} =~ s/^.*：(\S+) .*$/$1/s;
+	$data->{publisher} = $conv->convert($data->{publisher});
+	$data->{publisher} =~ s/^.*：(.*)$/$1/;
+	$data->{pubdate} = $conv->convert($data->{pubdate});
+	$data->{pubdate} =~ s/^.*：(.*)$/$1/;
 
 	my $bk = {
-		'isbn'		=> $data->{isbn},
+		'isbn'		=> $isbn,
 		'title'		=> $data->{title},
 		'author'	=> $data->{author},
 		'pages'		=> $data->{pages},
 		'book_link'	=> $book,
-		'image_link'	=> SILKBOOK.$data->{image_link},
+		'image_link'	=> "http://www.silkbook.com".$data->{image_link},
 		'pubdate'	=> $data->{pubdate},
 		'publisher'	=> $data->{publisher},
 		'price_list'	=> $data->{price_list},
